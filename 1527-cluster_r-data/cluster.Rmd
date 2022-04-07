@@ -1,0 +1,260 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(readr)
+library(dplyr)
+library(cluster)
+library(fpc)
+library(reshape2)
+library(ggplot2)
+```
+
+
+LENDO DADOS
+
+```{r}
+filmes <- read_csv("C:/Users/LucasZan/Desktop/Alura/1527-cluster_r-data/movies.csv")
+```
+
+```{r}
+df <- read_delim("C:/Users/LucasZan/Desktop/Alura/1527-cluster_r-data/movies_transf.csv", 
+    ";", escape_double = FALSE, trim_ws = TRUE)
+```
+
+
+```{r}
+filmes_tranformados <- df %>% 
+                          select(-movieId,-titulo)
+
+#Retirando valores ñ numericos do data frame (titulo e indice(nao importa agr))
+
+```
+
+Normalizando os dados para poder utilizar o machine learning
+```{r}
+dados_normalizados <- data.frame( scale(filmes_tranformados) )
+
+#scale faz a normalização dos dados numericos do dataframe, mas o resultado é em matriz, então utiliza-se a função data.frame() pra transfomar de volta em dataframe
+
+```
+
+Utilizando kmeans para gerar os clusters
+```{r}
+#para gerar os mesmo resultados da ALura
+set.seed(1987)
+#como o kmeans escolhe os cluester de forma aleatória usar o seed prar ter o mesmo resultado
+
+resultado_cluster <- kmeans(dados_normalizados, centers = 3)
+```
+
+
+```{r}
+resultado_cluster$cluster
+```
+
+```{r}
+View(resultado_cluster$centers)
+```
+Analise dos clusters 
+```{r}
+resultado_cluster$withinss
+```
+O cluster 1 não foi muito bom por causa do resultado muito alto
+
+```{r}
+resultado_cluster$size
+```
+O tamanho não está semelhante
+ou seja é necessario retreinar o modelo com numero diferente de clustes
+
+Plotando os dados do cluster usando a biblioteca cluster
+
+```{r}
+clusplot(x= filmes_tranformados, resultado_cluster$cluster, color = T, shade = T)
+```
+Pelo gráfico é possivel ver q os clusters estão muito agrupados, tendo dados q estão sobrepostos pelos 3 clustes e a diferença da quantidade de dados em um cluster pela distancia entre linhas
+
+
+```{r}
+plotcluster(x= filmes_tranformados, resultado_cluster$cluster, ignorenum = T)
+```
+
+
+Para gerar graficos mais faceis de entender para os clientes
+```{r}
+centros <- resultado_cluster$centers
+centros_2 <- melt(centros)
+#renomiando as colunas
+colnames(centros_2) <- c('cluster', 'genero', 'centro')
+centros_2$cluster <- as.factor(centros_2$cluster) #transforma o valor em fator
+```
+a função melt vai converter, tranpor a matriz, para gerar um grafico melhor, pois vai colocar em ordem o tipo de filme, e o valor normalizado de seu respectivo cluster
+
+```{r}
+ggplot(data = centros_2) +
+  geom_bar(aes(x= genero, y= centro, fill = cluster), stat = 'identity') +
+  facet_grid(cluster ~ .)
+```
+
+
+TECNICA ELBOW PARA IDENTIFICAR A MELHOR QUANTIDADE DE CLUSTERS PARA O DATAFRAME UTILIZADO
+
+```{r}
+range_k <- c(1:25)
+range_k
+
+soma_dos_quadrados <- 0
+
+
+```
+
+
+```{r}
+set.seed(1987)
+for (i in range_k) {
+  cluster3 <- kmeans(dados_normalizados, centers = i, nstart = 25)
+  soma_dos_quadrados[i] <- sum(cluster3$withinss)
+}
+```
+
+```{r}
+soma_dos_quadrados
+
+plot(range_k, soma_dos_quadrados, type = 'b',
+     xlab = 'Numero de clusters',
+     ylab = 'Soma dos Quadrados')
+axis(side = 1, at = range_k, labels = range_k)
+```
+
+pelo grafico a primeira quebra de linha é no 5 ou sejaseria a melhor quantidade de clusters a se usar
+
+
+
+Metodo Silhouette
+
+
+```{r}
+range_k <- c(2:15)
+
+medias_silhouete <- c(0)
+set.seed(1987)
+for (i in range_k) {
+  cluster3s <- kmeans(dados_normalizados, centers = i)
+  silhouete <- silhouette(cluster3s$cluster, dist(dados_normalizados))
+  medias_silhouete[i] <- mean( silhouete[,3])
+}
+
+```
+
+```{r}
+medias_silhouete
+
+plot(medias_silhouete, type = 'b',
+     xlab = 'Numero de clusters',
+     ylab = 'Media silhouette')
+axis(side = 1, at = range_k, labels = range_k)
+
+
+```
+
+Quanto mais proximo a 1 melhor, então o valor de 12 clusters seria o melhor resultado.
+
+
+Criando o cluster novamente agr com 12 clusters 
+
+```{r}
+set.seed(1987)
+resultado_cluster <- kmeans(dados_normalizados, centers = 12)
+```
+
+
+
+
+
+```{r}
+centros <- resultado_cluster$centers
+centros_2 <- melt(centros)
+colnames(centros_2) <- c('cluster', 'genero', 'centro')
+centros_2$cluster <- as.factor(centros_2$cluster)
+
+
+ggplot(data = centros_2) +
+  geom_bar(aes(x= genero, y= centro, fill = cluster), stat = 'identity') +
+  facet_grid(cluster ~ .)
+
+```
+
+agr, atribuir a os clusters na nossa base de dados filmes antes de poder indicar algum filme
+
+
+```{r}
+## Atribuindo cluster para cada filme
+filmes$cluster <- resultado_cluster$cluster
+View(filmes)
+```
+
+Pesquisando a q cluster algum filme pertence 
+```{r}
+## fazendo recomendação a partir de um filme
+agrupamento <- filmes[filmes$title == 'Toy Story (1995)','cluster']
+agrupamento
+```
+Sabendo em que cluster toy story ta, podemos buscar por filmes nesse cluster
+```{r}
+## selecinando 10 filmes dentro do cluster
+filmes[filmes$cluster == agrupamento, 'title'] %>% 
+  sample(10)
+```
+
+Clusters Hierarquicos
+
+```{r}
+matriz_dist <- dist(centros) #method = "euclidean"  # matrix de distÃ¢ncia
+matriz_dist
+#a distancia demonstra se os clusters são proximos, ou seja pode haver filmes recomendaveis pela proximidade
+
+## criando objeto de cluster hierarquico 
+clust_h <- hclust(matriz_dist) #, method = "complete")
+
+## grafico com o cluster hierarquico
+plot(clust_h)
+plot(clust_h,hang = -1)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
